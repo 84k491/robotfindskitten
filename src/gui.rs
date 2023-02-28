@@ -9,6 +9,7 @@ use crossterm::terminal::enable_raw_mode;
 
 use crate::playground::*;
 
+#[derive(Clone)]
 struct DisplayPoint {
     x: u16,
     y: u16,
@@ -29,6 +30,7 @@ pub struct GUI {
     stdout: Stdout,
     header_height: u16,
     top_string: String,
+    prev_player_pos: DisplayPoint,
     border: DisplayPoint,
 }
 
@@ -47,6 +49,7 @@ impl GUI {
             header_height: 3,
             top_string: String::from("Use 'hjkl' to move; 'q' to quit"),
             border,
+            prev_player_pos: DisplayPoint { x: 1, y: 1 },
         }
     }
 
@@ -75,16 +78,26 @@ impl GUI {
         return Ok(());
     }
 
-    fn print_top_string<'a>(&'a mut self, s: &'a String) -> Result<()> {
-        self.stdout.queue(cursor::MoveTo(2, 1))?;
+    fn print_status_string(&mut self, pt: &DisplayPoint, s: &str) -> Result<()> {
+        self.stdout.queue(cursor::MoveTo(0, pt.y))?;
+        self.stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
+        self.stdout.queue(style::PrintStyledContent("*".green()))?;
+        self.stdout.queue(cursor::MoveTo(2, pt.y))?;
         self.stdout.write(s.as_bytes())?;
+
+        if s.len() < self.border.x as usize {
+            self.stdout.queue(cursor::MoveTo(self.border.x, pt.y))?;
+            self.stdout.queue(style::PrintStyledContent("*".green()))?;
+        }
         Ok(())
     }
 
+    fn print_top_string<'a>(&'a mut self, s: &'a String) -> Result<()> {
+        self.print_status_string(&DisplayPoint { x: 2, y: 1 }, s)
+    }
+
     fn print_bottom_string<'a>(&'a mut self, s: &'a String) -> Result<()> {
-        self.stdout.queue(cursor::MoveTo(2, 2))?;
-        self.stdout.write(s.as_bytes())?;
-        Ok(())
+        self.print_status_string(&DisplayPoint { x: 2, y: 2 }, s)
     }
 
     fn compose_meeting_paddings(i: u16, out_of: u16) -> (String, String) {
@@ -133,6 +146,33 @@ impl GUI {
         Ok(())
     }
 
+    pub fn remember_player_position(&mut self, pos: &Point) {
+        let player_pos = pos.clone() + Point { x: 1, y: self.header_height as i32 + 1 };
+        self.prev_player_pos = match DisplayPoint::from(&player_pos) {
+            Some(pt) => pt,
+            None => { panic!("Negative display point"); }
+        };
+    }
+
+    fn clear_cell(&mut self, pt: &DisplayPoint) -> Result<()> {
+        self.stdout
+            .queue(cursor::MoveTo(pt.x, pt.y))?;
+        self.stdout.write(" ".as_bytes())?;
+        Ok(())
+    }
+
+    pub fn draw_updates(&mut self, playground: & Playground) -> Result<()> {
+        self.clear_cell(&self.prev_player_pos.clone())?;
+        self.draw_object_in_its_place(&playground.player.object)?;
+
+        self.print_top_string(&self.top_string.clone())?;
+        self.print_bottom_string(&playground.status)?;
+        self.finalize_cursor_position()?;
+
+        self.stdout.flush()?;
+        Ok(())
+    }
+
     // (0, 0) is top-left
     pub fn show<'a>(&mut self, playground: &'a Playground) -> Result<()> {
         self.stdout.execute(terminal::Clear(terminal::ClearType::All))?;
@@ -142,12 +182,10 @@ impl GUI {
         for obj in playground.objects.iter() {
             self.draw_object_in_its_place(&obj)?;
         }
-        let po_ref = &playground.player.object;
-        self.draw_object_in_its_place(po_ref)?;
+        self.draw_object_in_its_place(&playground.player.object)?;
 
         self.print_top_string(&self.top_string.clone())?;
         self.print_bottom_string(&playground.status)?;
-
         self.finalize_cursor_position()?;
 
         self.stdout.flush()?;

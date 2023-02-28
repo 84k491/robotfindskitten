@@ -15,11 +15,12 @@ fn main() -> Result<(), std::io::Error> {
     loop {
         let maybe_kitten = loop {
             let event = Controller::wait_event();
+            gui.remember_player_position(&pg.player.object.coordinate);
             let maybe_found_object = match event {
                 GameEvent::Move(dir) => pg.move_player(dir),
                 GameEvent::Quit =>  break None,
             };
-            gui.show(&pg)?;
+            gui.draw_updates(&pg)?;
             let found_object = if let Some(obj) = maybe_found_object {
                 obj
             }
